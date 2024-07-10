@@ -5,6 +5,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:lazy_flutter_helper/app/cubit/app_cubit.dart';
 import 'package:lazy_flutter_helper/bloc_generator/bloc_generator.dart';
 import 'package:lazy_flutter_helper/generator/swagger_to_dart.dart';
+import 'package:lazy_flutter_helper/home/home.dart';
+import 'package:lazy_flutter_helper/home/swagger_item.dart';
 import 'package:lazy_flutter_helper/src/src.dart';
 import 'package:lazy_flutter_helper/widgets/input_text_field.dart';
 import 'package:responsive_framework/responsive_framework.dart';
@@ -39,15 +41,16 @@ class MainApp extends StatelessWidget {
           ),
         ],
       ),
-      home: Scaffold(
-        body: Padding(
-          padding: const EdgeInsets.all(8),
-          child: App(
-            swaggerToDart: SwaggerToDart(),
-            blocGenerator: BlocGenerator(),
-          ),
-        ),
-      ),
+      home: const HomePage(),
+      // home: Scaffold(
+      //   body: Padding(
+      //     padding: const EdgeInsets.all(8),
+      //     child: App(
+      //       swaggerToDart: SwaggerToDart(),
+      //       blocGenerator: BlocGenerator(),
+      //     ),
+      //   ),
+      // ),
     );
   }
 }
@@ -56,17 +59,21 @@ class App extends StatelessWidget {
   const App({
     required this.swaggerToDart,
     required this.blocGenerator,
+    required this.swaggerItem,
     super.key,
   });
   final SwaggerToDart swaggerToDart;
   final BlocGenerator blocGenerator;
+  final SwaggerItem swaggerItem;
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (context) => AppCubit(
         swaggerToDart: swaggerToDart,
         blocGenerator: blocGenerator,
-      ),
+      )
+        ..swaggerUrl = swaggerItem.swaggerJsonUrl
+        ..filePathToGenerate = swaggerItem.filepathToGenerate,
       child: const AppView(),
     );
   }
@@ -84,174 +91,144 @@ class AppView extends StatefulWidget {
 class _AppViewState extends State<AppView> {
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Row(
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Generator'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
           children: [
-            Expanded(
-              child: AppInputTextField(
-                labelText: 'Enter the swagger json url:',
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter some text';
-                  }
-                  final regex = RegExp(
-                    r'^(http:\/\/localhost:\d+|https:\/\/localhost:\d+|http:\/\/[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}\/swagger\/v1\/swagger\.json|https:\/\/[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}\/swagger\/v1\/swagger\.json)$',
-                  );
-
-                  if (!regex.hasMatch(value)) {
-                    return 'Please enter a valid url in the format https://example.com/swagger/v1/swagger.json';
-                  }
-
-                  context.read<AppCubit>().swaggerUrl = value;
-                  return null;
-                },
-              ),
-            ),
-            const SizedBox(width: AppSpacing.lg),
-            Expanded(
-              child: AppInputTextField(
-                labelText: 'Enter the path to generate dart files:',
-                useExternalLabel: true,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter some text';
-                  }
-                  final dosePathExist = Directory(value).existsSync();
-                  if (!dosePathExist) {
-                    return 'The path does not exist. Please enter a valid path';
-                  }
-                  context.read<AppCubit>().filePathToGenerate = value;
-                  return null;
-                },
-              ),
-            ),
-            const SizedBox(width: AppSpacing.lg),
-            Column(
-              mainAxisAlignment: MainAxisAlignment.end,
+            Row(
               children: [
-                ElevatedButton(
-                  onPressed: () async {
-                    await context.read<AppCubit>().generate();
-                  },
-                  child: const Text('Generate'),
-                ),
-                BlocBuilder<AppCubit, AppState>(
-                  buildWhen: (previous, current) =>
-                      !current.appStateEnum.isInitial,
-                  builder: (context, state) {
-                    return Text(state.appStateEnum.name);
-                  },
-                ),
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AppInputTextField(
-                    labelText: 'Enter the cubit name:',
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter some text';
-                      }
-                      final regex = RegExp(r'^[a-zA-Z_][a-zA-Z0-9_]*$');
-                      if (!regex.hasMatch(value)) {
-                        return 'Please enter a valid cubit name';
-                      }
-                      context.read<AppCubit>().cubitName = value;
-                      return null;
-                    },
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: AppSpacing.lg),
-            Column(
-              children: [
-                ElevatedButton(
-                  onPressed: () async {
-                    await context.read<AppCubit>().generateCubit(
-                          context.read<AppCubit>().filePathToGenerate,
-                          context.read<AppCubit>().cubitName,
-                        );
-                  },
-                  child: const Text('Generate Cubit'),
-                ),
-              ],
-            ),
-          ],
-        ),
-        BlocSelector<AppCubit, AppState, SwaggerToDartResult>(
-          selector: (state) {
-            return state.swaggerToDartResult;
-          },
-          builder: (context, swaggerToDartResult) {
-            return Expanded(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: SearchWidget(
-                      values: swaggerToDartResult.modelsNames,
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    ElevatedButton(
+                      onPressed: () async {
+                        await context.read<AppCubit>().generate();
+                      },
+                      child: const Text('Generate'),
                     ),
-                  ),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: swaggerToDartResult.enumNames.length,
-                      itemBuilder: (context, index) {
-                        return CheckboxListTile(
-                          onChanged: (value) {},
-                          value: false,
-                          title: Text(swaggerToDartResult.enumNames[index]),
-                        );
+                    BlocBuilder<AppCubit, AppState>(
+                      buildWhen: (previous, current) =>
+                          !current.appStateEnum.isInitial,
+                      builder: (context, state) {
+                        return Text(state.appStateEnum.name);
                       },
                     ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AppInputTextField(
+                        labelText: 'Enter the cubit name:',
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter some text';
+                          }
+                          final regex = RegExp(r'^[a-zA-Z_][a-zA-Z0-9_]*$');
+                          if (!regex.hasMatch(value)) {
+                            return 'Please enter a valid cubit name';
+                          }
+                          context.read<AppCubit>().cubitName = value;
+                          return null;
+                        },
+                      ),
+                    ],
                   ),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        const AppInputTextField(
-                          labelText: 'Search',
-                        ),
-                        Expanded(
-                          child: ListView.builder(
-                            itemCount: swaggerToDartResult.methodNames.length,
-                            itemBuilder: (context, index) {
-                              return Tooltip(
-                                textStyle: Theme.of(context)
-                                    .textTheme
-                                    .titleLarge!
-                                    .copyWith(
-                                      color: Colors.white,
-                                    ),
-                                message: swaggerToDartResult
-                                        .methodNamesAndSignatures[
-                                    swaggerToDartResult.methodNames[index]],
-                                child: CheckboxListTile(
-                                  onChanged: (value) {},
-                                  value: false,
-                                  title: Text(
-                                    swaggerToDartResult.methodNames[index],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
+                ),
+                const SizedBox(width: AppSpacing.lg),
+                Column(
+                  children: [
+                    ElevatedButton(
+                      onPressed: () async {
+                        await context.read<AppCubit>().generateCubit(
+                              context.read<AppCubit>().filePathToGenerate,
+                              context.read<AppCubit>().cubitName,
+                            );
+                      },
+                      child: const Text('Generate Cubit'),
                     ),
+                  ],
+                ),
+              ],
+            ),
+            BlocSelector<AppCubit, AppState, SwaggerToDartResult>(
+              selector: (state) {
+                return state.swaggerToDartResult;
+              },
+              builder: (context, swaggerToDartResult) {
+                return Expanded(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: SearchWidget(
+                          values: swaggerToDartResult.modelsNames,
+                        ),
+                      ),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: swaggerToDartResult.enumNames.length,
+                          itemBuilder: (context, index) {
+                            return CheckboxListTile(
+                              onChanged: (value) {},
+                              value: false,
+                              title: Text(swaggerToDartResult.enumNames[index]),
+                            );
+                          },
+                        ),
+                      ),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            const AppInputTextField(
+                              labelText: 'Search',
+                            ),
+                            Expanded(
+                              child: ListView.builder(
+                                itemCount:
+                                    swaggerToDartResult.methodNames.length,
+                                itemBuilder: (context, index) {
+                                  return Tooltip(
+                                    textStyle: Theme.of(context)
+                                        .textTheme
+                                        .titleLarge!
+                                        .copyWith(
+                                          color: Colors.white,
+                                        ),
+                                    message: swaggerToDartResult
+                                            .methodNamesAndSignatures[
+                                        swaggerToDartResult.methodNames[index]],
+                                    child: CheckboxListTile(
+                                      onChanged: (value) {},
+                                      value: false,
+                                      title: Text(
+                                        swaggerToDartResult.methodNames[index],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            );
-          },
+                );
+              },
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }

@@ -322,7 +322,7 @@ class DartGenerator {
         }
       } else if (modelNamesMap.contains(fieldType)) {
         buffer.writeln(
-          "      $fieldName: $fieldType.fromMap(map['$fieldName'] as Map<String, dynamic>),",
+          "      $fieldName: map['$fieldName'] == null ? $fieldType.empty : $fieldType.fromMap(map['$fieldName'] as Map<String, dynamic>),",
         );
       } else if (enumNamesMap.contains(fieldType)) {
         buffer.writeln(
