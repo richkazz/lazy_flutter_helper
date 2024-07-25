@@ -9,6 +9,8 @@ class DartGenerator {
   final String fileLocation;
   final modelNamesMap = <String>{};
   final enumNamesMap = <String>{};
+  final enumNamesAndDefinitions = <String, String>{};
+  final modelNamesAndDefinitionsMap = <String, String>{};
   final methodNamesMap = <String, int>{};
   final methodNamesAndSignatures = <String, String>{};
   SwaggerToDartResult generate() {
@@ -18,7 +20,9 @@ class DartGenerator {
       modelsNames: modelNamesMap.toList(),
       enumNames: enumNamesMap.toList(),
       methodNames: methodNamesMap.keys.toList(),
+      enumNamesAndDefinitions: enumNamesAndDefinitions,
       methodNamesAndSignatures: methodNamesAndSignatures,
+      modelNamesAndDefinitionsMap: modelNamesAndDefinitionsMap,
     );
   }
 
@@ -78,11 +82,14 @@ class DartGenerator {
   String generateEnum(String name, Map<String, dynamic> schema) {
     final className = name.capitalize();
     final buffer = StringBuffer();
+    final bufferDescription = StringBuffer()..writeln('enum name: $className|');
     buffer.writeln('enum $className {');
+    bufferDescription.write('enum fields:');
     final fields = schema['enum'] as List<dynamic>;
     for (var i = 0; i < fields.length; i++) {
       final field = fields[i] as String;
       buffer.write(field.firstLetterLowerCase());
+      bufferDescription.write('$field|');
       if (i != fields.length - 1) {
         buffer.write(',');
       } else {
@@ -100,8 +107,9 @@ class DartGenerator {
       );
     }
     buffer.writeln('}');
-    final file = File('$fileLocation\\enums\\${name.snakeCase()}.dart');
-    file.writeAsStringSync(buffer.toString());
+    File('$fileLocation\\enums\\${name.snakeCase()}.dart')
+        .writeAsStringSync(buffer.toString());
+    enumNamesAndDefinitions[className] = bufferDescription.toString();
     return '${name.snakeCase()}.dart';
   }
 
@@ -258,7 +266,7 @@ class DartGenerator {
     fields.forEach((fieldName, fieldSchema) {
       final fieldType = getFieldType(fieldSchema as Map<String, dynamic>);
       if (modelNamesMap.contains(fieldType)) {
-        buffer.writeln("      '$fieldName': $fieldName.toJson(),");
+        buffer.writeln("      '$fieldName': $fieldName.toMap(),");
       } else if (enumNamesMap.contains(fieldType)) {
         buffer.writeln("      '$fieldName': $fieldName.index,");
       } else {
@@ -287,6 +295,9 @@ class DartGenerator {
     Map<String, dynamic> fields,
     String className,
   ) {
+    final bufferModelDescription = StringBuffer()
+      ..writeln('Model Name: $className|')
+      ..write(' Fields Name:type: ');
     buffer.writeln();
     buffer.writeln('  factory $className.fromMap(Map<String, dynamic> map,) {');
     buffer.writeln('    return $className(');
@@ -308,35 +319,44 @@ class DartGenerator {
               '.map((e) => $fieldTypeRemoveList.fromMap(e as Map<String, dynamic>))',
             );
             buffer.writeln('.toList(),');
+            bufferModelDescription.write('$fieldName: $fieldTypeRemoveList|');
           } else {
             buffer.writeln("$fieldName: (map['$fieldName'] as List<dynamic>)");
             buffer.writeln(
               '.map((e) => $fieldTypeRemoveList.fromMap(e as Map<String, dynamic>))',
             );
             buffer.writeln('.toList(),');
+            bufferModelDescription.write('$fieldName: $fieldTypeRemoveList|');
           }
         } else {
           buffer.writeln(
             "      $fieldName:map['$fieldName'] == null ? null :  $fieldType.from(map['$fieldName'] as List<dynamic>),",
           );
+          bufferModelDescription.write('$fieldName: $fieldTypeRemoveList|');
         }
       } else if (modelNamesMap.contains(fieldType)) {
         buffer.writeln(
           "      $fieldName: map['$fieldName'] == null ? $fieldType.empty : $fieldType.fromMap(map['$fieldName'] as Map<String, dynamic>),",
         );
+        bufferModelDescription.write('$fieldName: $fieldType|');
       } else if (enumNamesMap.contains(fieldType)) {
         buffer.writeln(
           "      $fieldName: $fieldType.values[map['$fieldName']  as int],",
         );
+        bufferModelDescription.write('$fieldName: $fieldType|');
       } else {
         buffer.writeln(
           "      $fieldName: map['$fieldName'] as $fieldType$nullable,",
         );
+        bufferModelDescription.write('$fieldName: $fieldType|');
       }
     });
     buffer
       ..writeln('    );')
       ..writeln('  }');
+    bufferModelDescription.write(
+        '  Methods: fromMap,toJson,fromJson,toMap,empty,isEmpty,isNotEmpty');
+    modelNamesAndDefinitionsMap[className] = bufferModelDescription.toString();
   }
 
   void defineConstructor(
@@ -397,29 +417,30 @@ class DartGenerator {
   }
 
   void generateResultClass(StringBuffer buffer) {
-    buffer.writeln('class Result<T, E> {');
-    buffer.writeln('  T? data;');
-    buffer.writeln('  E? errorData;');
-    buffer.writeln('  bool isSuccess;');
-    buffer.writeln();
-    buffer.writeln('  Result({');
-    buffer.writeln('    this.data,');
-    buffer.writeln('    this.errorData,');
-    buffer.writeln('    required this.isSuccess,');
-    buffer.writeln('  });');
-    buffer.writeln();
-    buffer.writeln('  Result<T, E> copyWith({');
-    buffer.writeln('    T? data,');
-    buffer.writeln('    bool? isSuccess,');
-    buffer.writeln('    E? errorData');
-    buffer.writeln('  }) {');
-    buffer.writeln('    return Result<T, E>(');
-    buffer.writeln('      data: data ?? this.data,');
-    buffer.writeln('      isSuccess: isSuccess ?? this.isSuccess,');
-    buffer.writeln('      errorData: errorData ?? this.errorData');
-    buffer.writeln('    );');
-    buffer.writeln('  }');
-    buffer.writeln('}');
+    buffer
+      ..writeln('class Result<T, E> {')
+      ..writeln('  T? data;')
+      ..writeln('  E? errorData;')
+      ..writeln('  bool isSuccess;')
+      ..writeln()
+      ..writeln('  Result({')
+      ..writeln('    this.data,')
+      ..writeln('    this.errorData,')
+      ..writeln('    required this.isSuccess,')
+      ..writeln('  });')
+      ..writeln()
+      ..writeln('  Result<T, E> copyWith({')
+      ..writeln('    T? data,')
+      ..writeln('    bool? isSuccess,')
+      ..writeln('    E? errorData')
+      ..writeln('  }) {')
+      ..writeln('    return Result<T, E>(')
+      ..writeln('      data: data ?? this.data,')
+      ..writeln('      isSuccess: isSuccess ?? this.isSuccess,')
+      ..writeln('      errorData: errorData ?? this.errorData')
+      ..writeln('    );')
+      ..writeln('  }')
+      ..writeln('}');
   }
 
   void generateExceptionClass(StringBuffer buffer) {
@@ -427,31 +448,19 @@ class DartGenerator {
   }
 
   void generateService() {
-    final buffer = StringBuffer();
-    buffer.writeln("import 'dart:convert';");
-    buffer.writeln("import 'dart:developer';");
-    buffer.writeln("import 'package:http/http.dart' as http;");
-    buffer.writeln("import 'models/models.dart';");
+    final buffer = StringBuffer()
+      ..writeln("import 'dart:convert';")
+      ..writeln("import 'dart:developer';")
+      ..writeln("import 'package:http/http.dart' as http;")
+      ..writeln("import 'models/models.dart';")
+      ..writeln("import 'http_client_call.dart';");
     generateExceptionClass(buffer);
     generateResultClass(buffer);
-    buffer.writeln('class ApiService {');
-    buffer.writeln('  ApiService(this.baseUrl, {String? token}){');
-    buffer.writeln('  if (token != null) {');
-    buffer.writeln("      headers['Authorization'] = 'Bearer \$token';");
-    buffer.writeln('  }');
-    buffer.writeln('  }');
-    buffer.writeln('  final String baseUrl;');
-    buffer.writeln('  void updateToken(String token) {');
-    buffer.writeln("      headers['Authorization'] = 'Bearer \$token';");
-    buffer.writeln('  }');
-    buffer.writeln('  void removeToken() {');
-    buffer.writeln("      headers.remove('Authorization');");
-    buffer.writeln('  }');
     buffer
-      ..writeln('')
-      ..writeln('  Map<String, String> headers = {');
-    buffer.writeln("    'Content-Type': 'application/json',");
-    buffer.writeln('  };');
+      ..writeln('class ApiService {')
+      ..writeln('  ApiService({required this.httpClientCall});')
+      ..writeln('  final HttpClientCall httpClientCall;');
+
     final paths = swaggerData.paths;
     paths.forEach((path, methods) {
       methods.forEach((method, details) {
@@ -465,9 +474,12 @@ class DartGenerator {
     });
 
     buffer.writeln('}');
-
-    final file = File('$fileLocation\\api_service.dart');
-    file.writeAsStringSync(buffer.toString());
+    if (!File('$fileLocation\\http_client_call.dart').existsSync()) {
+      File('$fileLocation\\http_client_call.dart')
+          .writeAsStringSync(generateHttpClientCall());
+    }
+    File('$fileLocation\\api_service.dart')
+        .writeAsStringSync(buffer.toString());
   }
 
   void generateServiceMethod(
@@ -581,11 +593,11 @@ class DartGenerator {
       ..writeln('    try {');
     if (parameterType.isNotEmpty) {
       buffer.writeln(
-        "      final response = await http.$method(Uri.parse('\$baseUrl$path'),headers: headers,body:request.toJson());",
+        "      final response = await  httpClientCall.$method('$path', body: request.toJson());",
       );
     } else {
       buffer.writeln(
-        "      final response = await http.$method(Uri.parse('\$baseUrl$path'),headers: headers);",
+        "      final response = await  httpClientCall.$method('$path');",
       );
     }
 
@@ -595,17 +607,18 @@ class DartGenerator {
     for400(buffer, returnType, returnTypeWithoutList, throwErrorType, isArray);
 
     // Handle other responses
-    buffer.writeln('        default:');
-    buffer.writeln(
-      "          throw Exception('Unexpected error: \${response.statusCode} \${response.body}');",
-    );
-    buffer.writeln('      }');
-    buffer.writeln('    } catch (error, stacktrace) {');
-    buffer.writeln("      log('Error: \$error');");
-    buffer.writeln("      log('Stacktrace: \$stacktrace');");
-    buffer.writeln('      rethrow;');
-    buffer.writeln('    }');
-    buffer.writeln('  }');
+    buffer
+      ..writeln('        default:')
+      ..writeln(
+        r"          throw Exception('Unexpected error: ${response.statusCode} ${response.body}');",
+      )
+      ..writeln('      }')
+      ..writeln('    } catch (error, stacktrace) {')
+      ..writeln(r"      log('Error: $error');")
+      ..writeln(r"      log('Stacktrace: $stacktrace');")
+      ..writeln('      rethrow;')
+      ..writeln('    }')
+      ..writeln('  }');
   }
 
   String handelParameterSettingAndPathBuilding(
@@ -672,7 +685,7 @@ class DartGenerator {
     } else {
       buffer.writeln('        case 400:');
       buffer.writeln(
-        "          throw Exception('Bad request: \${response.body}');",
+        r"          throw Exception('Bad request: ${response.body}');",
       );
     }
   }
@@ -700,23 +713,161 @@ class DartGenerator {
         '          return ${getReturnType(throwErrorType, returnType)}(data: result, isSuccess: true);',
       );
     } else {
-      buffer.writeln('        case 200:');
-      buffer.writeln(
-        '          return ${getReturnType(throwErrorType, returnType)}(isSuccess: true);',
-      );
+      buffer
+        ..writeln('        case 200:')
+        ..writeln(
+          '          return ${getReturnType(throwErrorType, returnType)}(isSuccess: true);',
+        );
     }
   }
 
   String getReturnType(String errorType, String returnType) {
     if (returnType == 'void' && errorType.isNotEmpty) {
-      return 'Result<Null,$errorType>';
+      return 'Result<void,$errorType>';
     } else if (returnType == 'void' && errorType.isEmpty) {
-      return 'Result<Null,Null>';
+      return 'Result<void,void>';
     } else if (returnType != 'void' && errorType.isEmpty) {
-      return 'Result<$returnType,Null>';
+      return 'Result<$returnType,void>';
     } else {
       return 'Result<$returnType,$errorType>';
     }
+  }
+
+  String generateHttpClientCall() {
+    final buffer = StringBuffer()
+      ..writeln("import 'package:http/http.dart' as http;")
+      ..writeln()
+      ..writeln('class HttpClientCall {')
+      ..writeln('  HttpClientCall({')
+      ..writeln('    required this.handelJsonToken,')
+      ..writeln('    required this.baseUrl,')
+      ..writeln('    String? token,')
+      ..writeln('  }) {')
+      ..writeln('    if (token != null) {')
+      ..writeln(r"      headers['Authorization'] = 'Bearer $token';")
+      ..writeln('    }')
+      ..writeln('  }')
+      ..writeln('  final HandelJsonToken handelJsonToken;')
+      ..writeln('  final String baseUrl;')
+      ..writeln('  void updateToken(String token) {')
+      ..writeln(r"    headers['Authorization'] = 'Bearer $token';")
+      ..writeln('  }')
+      ..writeln()
+      ..writeln('  void removeToken() {')
+      ..writeln("    headers.remove('Authorization');")
+      ..writeln('  }')
+      ..writeln()
+      ..writeln('  Map<String, String> headers = {')
+      ..writeln("    'Content-Type': 'application/json',")
+      ..writeln('  };')
+      ..writeln(
+          '  Future<http.Response> get(String url, {Map<String, String>? headers}) async {')
+      ..writeln(
+          r'    final response = await http.get(Uri.parse($baseUrl$url), headers: {...this.headers, ...?headers});')
+      ..writeln('    if (response.statusCode == 401) {')
+      ..writeln('      final result = await refreshToken();')
+      ..writeln('      if (result) {')
+      ..writeln(
+          r'        final response = await http.get(Uri.parse($baseUrl$url), headers: {...this.headers, ...?headers});')
+      ..writeln('        return response;')
+      ..writeln('      }')
+      ..writeln('    }')
+      ..writeln('    return response;')
+      ..writeln('  }')
+      ..writeln()
+      ..writeln('  Future<bool> refreshToken() async {')
+      ..writeln(
+          '    final refreshToken = await handelJsonToken.getRefreshToken;')
+      ..writeln('    if (refreshToken != null) {')
+      ..writeln(
+          '      final request = RefreshRequest(refreshToken: refreshToken);')
+      ..writeln('      final response = await http.post(')
+      ..writeln(r"        Uri.parse('$baseUrl/refresh'),")
+      ..writeln("        headers: {'Content-Type': 'application/json'},")
+      ..writeln('        body: request.toJson(),')
+      ..writeln('      );')
+      ..writeln('      if (response.statusCode == 200) {')
+      ..writeln(
+          '        final result = AccessTokenResponse.fromJson(response.body);')
+      ..writeln(
+          '        await handelJsonToken.setJsonToken(result.accessToken);')
+      ..writeln(
+          '        await handelJsonToken.setRefreshToken(result.refreshToken);')
+      ..writeln(
+          r"        headers['Authorization'] = 'Bearer ${result.accessToken}';")
+      ..writeln('        return true;')
+      ..writeln('      }')
+      ..writeln('    }')
+      ..writeln('    return false;')
+      ..writeln('  }')
+      ..writeln()
+      ..writeln('  Future<http.Response> post(String url, {')
+      ..writeln('    Map<String, String>? headers,')
+      ..writeln('    String? body,')
+      ..writeln('  }) async {')
+      ..writeln('    final response = await http.post(')
+      ..writeln(r"      Uri.parse('$baseUrl$url'),")
+      ..writeln('      headers: {...this.headers, ...?headers},')
+      ..writeln('      body: body,')
+      ..writeln('    );')
+      ..writeln('    if (response.statusCode == 401) {')
+      ..writeln('      final result = await refreshToken();')
+      ..writeln('      if (result) {')
+      ..writeln('        final response = await http.post(')
+      ..writeln(r"          Uri.parse('$baseUrl$url'),")
+      ..writeln('          headers: {...this.headers, ...?headers},')
+      ..writeln('          body: body,')
+      ..writeln('        );')
+      ..writeln('        return response;')
+      ..writeln('      }')
+      ..writeln('    }')
+      ..writeln('    return response;')
+      ..writeln('  }')
+      ..writeln()
+      ..writeln('  Future<http.Response> put(String url, {')
+      ..writeln('    Map<String, String>? headers,')
+      ..writeln('    String? body,')
+      ..writeln('  }) async {')
+      ..writeln('    final response = await http.put(')
+      ..writeln(r"      Uri.parse('$baseUrl$url'),")
+      ..writeln('      headers: {...this.headers, ...?headers},')
+      ..writeln('      body: body,')
+      ..writeln('    );')
+      ..writeln('    if (response.statusCode == 401) {')
+      ..writeln('      final result = await refreshToken();')
+      ..writeln('      if (result) {')
+      ..writeln('        final response = await http.put(')
+      ..writeln(r"      Uri.parse('$baseUrl$url'),")
+      ..writeln('          headers: {...this.headers, ...?headers},')
+      ..writeln('          body: body,')
+      ..writeln('        );')
+      ..writeln('        return response;')
+      ..writeln('      }')
+      ..writeln('    }')
+      ..writeln('    return response;')
+      ..writeln('  }')
+      ..writeln()
+      ..writeln('  Future<http.Response> delete(String url, {')
+      ..writeln('    Map<String, String>? headers,')
+      ..writeln('  }) async {')
+      ..writeln('    final response = await http.delete(')
+      ..writeln(r"      Uri.parse('$baseUrl$url'),")
+      ..writeln('      headers: {...this.headers, ...?headers},')
+      ..writeln('    );')
+      ..writeln('    if (response.statusCode == 401) {')
+      ..writeln('      final result = await refreshToken();')
+      ..writeln('      if (result) {')
+      ..writeln('        final response = await http.delete(')
+      ..writeln(r"          Uri.parse('$baseUrl$url'),")
+      ..writeln('          headers: {...this.headers, ...?headers},')
+      ..writeln('        );')
+      ..writeln('        return response;')
+      ..writeln('      }')
+      ..writeln('    }')
+      ..writeln('    return response;')
+      ..writeln('  }')
+      ..writeln('}');
+    return buffer.toString();
   }
 }
 

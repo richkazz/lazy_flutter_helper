@@ -29,9 +29,13 @@ class SwaggerToDartResult {
       {required this.modelsNames,
       required this.enumNames,
       required this.methodNames,
+      required this.enumNamesAndDefinitions,
+      required this.modelNamesAndDefinitionsMap,
       required this.methodNamesAndSignatures});
   final List<String> modelsNames;
   final List<String> enumNames;
   final List<String> methodNames;
   final Map<String, String> methodNamesAndSignatures;
+  final Map<String, String> enumNamesAndDefinitions;
+  final Map<String, String> modelNamesAndDefinitionsMap;
 }

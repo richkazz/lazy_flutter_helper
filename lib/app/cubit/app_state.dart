@@ -20,6 +20,8 @@ class AppState extends Equatable {
       enumNames: [],
       methodNames: [],
       methodNamesAndSignatures: {},
+      enumNamesAndDefinitions: {},
+      modelNamesAndDefinitionsMap: {},
     ),
   });
   final AppStateEnum appStateEnum;

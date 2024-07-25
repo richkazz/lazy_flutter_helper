@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:lazy_flutter_helper/app/cubit/app_cubit.dart';
 import 'package:lazy_flutter_helper/bloc_generator/bloc_generator.dart';
@@ -100,24 +101,26 @@ class _AppViewState extends State<AppView> {
         child: Column(
           children: [
             Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    ElevatedButton(
-                      onPressed: () async {
-                        await context.read<AppCubit>().generate();
-                      },
-                      child: const Text('Generate'),
-                    ),
-                    BlocBuilder<AppCubit, AppState>(
-                      buildWhen: (previous, current) =>
-                          !current.appStateEnum.isInitial,
-                      builder: (context, state) {
-                        return Text(state.appStateEnum.name);
-                      },
-                    ),
-                  ],
+                SizedBox(
+                  height: 70,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      await context.read<AppCubit>().generate();
+                    },
+                    child: const Text('Generate'),
+                  ),
+                ),
+                const SizedBox(
+                  width: AppSpacing.lg,
+                ),
+                BlocBuilder<AppCubit, AppState>(
+                  buildWhen: (previous, current) =>
+                      !current.appStateEnum.isInitial,
+                  builder: (context, state) {
+                    return Text(state.appStateEnum.name);
+                  },
                 ),
               ],
             ),
@@ -174,53 +177,21 @@ class _AppViewState extends State<AppView> {
                           values: swaggerToDartResult.modelsNames,
                         ),
                       ),
-                      Expanded(
-                        child: ListView.builder(
-                          itemCount: swaggerToDartResult.enumNames.length,
-                          itemBuilder: (context, index) {
-                            return CheckboxListTile(
-                              onChanged: (value) {},
-                              value: false,
-                              title: Text(swaggerToDartResult.enumNames[index]),
-                            );
-                          },
-                        ),
+                      const SizedBox(
+                        width: AppSpacing.lg,
                       ),
                       Expanded(
-                        child: Column(
-                          children: [
-                            const AppInputTextField(
-                              labelText: 'Search',
-                            ),
-                            Expanded(
-                              child: ListView.builder(
-                                itemCount:
-                                    swaggerToDartResult.methodNames.length,
-                                itemBuilder: (context, index) {
-                                  return Tooltip(
-                                    textStyle: Theme.of(context)
-                                        .textTheme
-                                        .titleLarge!
-                                        .copyWith(
-                                          color: Colors.white,
-                                        ),
-                                    message: swaggerToDartResult
-                                            .methodNamesAndSignatures[
-                                        swaggerToDartResult.methodNames[index]],
-                                    child: CheckboxListTile(
-                                      onChanged: (value) {},
-                                      value: false,
-                                      title: Text(
-                                        swaggerToDartResult.methodNames[index],
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                          ],
+                        child: SearchEnumWidget(
+                          values: swaggerToDartResult.enumNames,
                         ),
                       ),
+                      const SizedBox(
+                        width: AppSpacing.lg,
+                      ),
+                      Expanded(
+                          child: SearchMethodWidget(
+                        values: swaggerToDartResult.methodNames,
+                      )),
                     ],
                   ),
                 );
@@ -233,6 +204,19 @@ class _AppViewState extends State<AppView> {
   }
 }
 
+Future<void> _copyToClipboard(String text, BuildContext context) async {
+  await Clipboard.setData(
+    ClipboardData(
+      text: text,
+    ),
+  );
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('Copied to clipboard'),
+    ),
+  );
+}
+
 class SearchWidget extends StatefulWidget {
   const SearchWidget({required this.values, super.key});
   final List<String> values;
@@ -243,11 +227,11 @@ class SearchWidget extends StatefulWidget {
 
 class _SearchWidgetState extends State<SearchWidget> {
   List<String> searchResults = [];
-
+  late SwaggerToDartResult swaggerToDartResult;
   @override
   void initState() {
-    super.initState();
     searchResults = widget.values.toList();
+    super.initState();
   }
 
   void onSearch(String query) {
@@ -262,21 +246,183 @@ class _SearchWidgetState extends State<SearchWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        AppInputTextField(
-          labelText: 'Search',
-          onChanged: onSearch,
-        ),
-        Expanded(
-          child: ListView.builder(
-            itemCount: searchResults.length,
-            itemBuilder: (context, index) {
-              return ModelListItem(modelName: searchResults[index]);
-            },
+    return BlocListener<AppCubit, AppState>(
+      listener: (context, state) {
+        swaggerToDartResult = state.swaggerToDartResult;
+        setState(() {
+          searchResults = state.swaggerToDartResult.modelsNames.toList();
+        });
+      },
+      child: Column(
+        children: [
+          AppInputTextField(
+            labelText: 'Search Model',
+            onChanged: onSearch,
           ),
-        ),
-      ],
+          Expanded(
+            child: ListView.builder(
+              itemCount: searchResults.length,
+              itemBuilder: (context, index) {
+                return ModelListItem(
+                  modelName: searchResults[index],
+                  swaggerToDartResult: swaggerToDartResult,
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class SearchMethodWidget extends StatefulWidget {
+  const SearchMethodWidget({required this.values, super.key});
+  final List<String> values;
+
+  @override
+  State<SearchMethodWidget> createState() => _SearchSearchMethodWidgetState();
+}
+
+class _SearchSearchMethodWidgetState extends State<SearchMethodWidget> {
+  List<String> searchResults = [];
+  late SwaggerToDartResult swaggerToDartResult;
+  @override
+  void initState() {
+    searchResults = widget.values.toList();
+    super.initState();
+  }
+
+  void onSearch(String query) {
+    setState(() {
+      searchResults = widget.values
+          .where(
+            (element) => element.toLowerCase().contains(query.toLowerCase()),
+          )
+          .toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocListener<AppCubit, AppState>(
+      listener: (context, state) {
+        swaggerToDartResult = state.swaggerToDartResult;
+        setState(() {
+          searchResults = state.swaggerToDartResult.methodNames.toList();
+        });
+      },
+      child: Column(
+        children: [
+          AppInputTextField(
+            labelText: 'Search Method',
+            onChanged: onSearch,
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: searchResults.length,
+              itemBuilder: (context, index) {
+                return Tooltip(
+                  textStyle: Theme.of(context).textTheme.titleLarge!.copyWith(
+                        color: Colors.white,
+                      ),
+                  message: swaggerToDartResult
+                      .methodNamesAndSignatures[searchResults[index]],
+                  child: ListTile(
+                    trailing: Checkbox(
+                      onChanged: (value) {},
+                      value: false,
+                    ),
+                    leading: IconButton(
+                      icon: const Icon(Icons.copy),
+                      onPressed: () => _copyToClipboard(
+                        swaggerToDartResult
+                            .methodNamesAndSignatures[searchResults[index]]!,
+                        context,
+                      ),
+                    ),
+                    title: Text(
+                      searchResults[index],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class SearchEnumWidget extends StatefulWidget {
+  const SearchEnumWidget({required this.values, super.key});
+  final List<String> values;
+
+  @override
+  State<SearchEnumWidget> createState() => _SearchSearchEnumWidgetState();
+}
+
+class _SearchSearchEnumWidgetState extends State<SearchEnumWidget> {
+  List<String> searchResults = [];
+  late SwaggerToDartResult swaggerToDartResult;
+  @override
+  void initState() {
+    searchResults = widget.values.toList();
+    super.initState();
+  }
+
+  void onSearch(String query) {
+    setState(() {
+      searchResults = widget.values
+          .where(
+            (element) => element.toLowerCase().contains(query.toLowerCase()),
+          )
+          .toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocListener<AppCubit, AppState>(
+      listener: (context, state) {
+        swaggerToDartResult = state.swaggerToDartResult;
+        setState(() {
+          searchResults = state.swaggerToDartResult.enumNames.toList();
+        });
+      },
+      child: Column(
+        children: [
+          AppInputTextField(
+            labelText: 'Search Enum',
+            onChanged: onSearch,
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: searchResults.length,
+              itemBuilder: (context, index) {
+                return ListTile(
+                  trailing: Checkbox(
+                    onChanged: (value) {},
+                    value: false,
+                  ),
+                  leading: IconButton(
+                    icon: const Icon(Icons.copy),
+                    onPressed: () => _copyToClipboard(
+                      swaggerToDartResult
+                          .enumNamesAndDefinitions[searchResults[index]]!,
+                      context,
+                    ),
+                  ),
+                  title: Text(
+                    searchResults[index],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -284,10 +430,11 @@ class _SearchWidgetState extends State<SearchWidget> {
 class ModelListItem extends StatefulWidget {
   const ModelListItem({
     required this.modelName,
+    required this.swaggerToDartResult,
     super.key,
   });
   final String modelName;
-
+  final SwaggerToDartResult swaggerToDartResult;
   @override
   State<ModelListItem> createState() => _ModelListItemState();
 }
@@ -307,9 +454,18 @@ class _ModelListItemState extends State<ModelListItem> {
 
   @override
   Widget build(BuildContext context) {
-    return CheckboxListTile(
-      onChanged: _onTap,
-      value: _isChecked,
+    return ListTile(
+      trailing: Checkbox(
+        onChanged: _onTap,
+        value: _isChecked,
+      ),
+      leading: IconButton(
+        icon: const Icon(Icons.copy),
+        onPressed: () => _copyToClipboard(
+            widget.swaggerToDartResult
+                .modelNamesAndDefinitionsMap[widget.modelName]!,
+            context),
+      ),
       title: Text(widget.modelName),
     );
   }
