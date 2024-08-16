@@ -14,6 +14,7 @@ class DartGenerator {
   final modelNamesAndDefinitionsMap = <String, String>{};
   final methodNamesMap = <String, int>{};
   final methodNamesAndSignatures = <String, String>{};
+
   SwaggerToDartResult generate() {
     generateModels();
     generateService();
@@ -48,10 +49,10 @@ class DartGenerator {
       String fileName;
       if ((schema as Map<String, dynamic>).containsKey('enum')) {
         fileName = generateEnum(name, schema);
-        final doseFileExist =
+        final doesFileExist =
             File('$fileLocation\\enums\\${name.snakeCase()}_extension.dart')
                 .existsSync();
-        if (!doseFileExist) {
+        if (!doesFileExist) {
           generateEnumExtension(name, schema);
         }
         bufferEnum.writeln("export '${name.snakeCase()}.dart';");
@@ -70,47 +71,102 @@ class DartGenerator {
   String generateEnum(String name, Map<String, dynamic> schema) {
     final className = name.capitalize();
     final buffer = StringBuffer();
-    final bufferDescription = StringBuffer()..writeln('enum name: $className|');
     buffer.writeln('enum $className {');
-    bufferDescription.write('enum fields:');
     final fields = schema['enum'] as List<dynamic>;
-    for (var i = 0; i < fields.length; i++) {
-      final field = fields[i] as String;
-      buffer.write(field.firstLetterLowerCase());
-      bufferDescription.write('$field|');
-      if (i != fields.length - 1) {
-        buffer.write(',');
-      } else {
-        buffer
-          ..write(',')
-          ..writeln('none;');
-      }
-      buffer.writeln('');
-    }
-    buffer.writeln('');
-    for (var i = 0; i < fields.length; i++) {
-      final field = fields[i] as String;
-      buffer.writeln(
-        'bool get is$field => this == $className.${field.firstLetterLowerCase()};',
-      );
+    for (var field in fields) {
+      buffer.writeln('  ${field.toString().snakeCase()},');
     }
     buffer.writeln('}');
     File('$fileLocation\\enums\\${name.snakeCase()}.dart')
         .writeAsStringSync(buffer.toString());
-    enumNamesAndDefinitions[className] = bufferDescription.toString();
     return '${name.snakeCase()}.dart';
   }
 
   String generateEnumExtension(String name, Map<String, dynamic> schema) {
     final className = name.capitalize();
-    final buffer = StringBuffer();
-    buffer
+    final buffer = StringBuffer()
       ..writeln("import '../enums/enums.dart';")
-      ..writeln('extension ${className}Extension on $className {}');
-    final file =
-        File('$fileLocation\\enums\\${name.snakeCase()}_extension.dart');
-    file.writeAsStringSync(buffer.toString());
+      ..writeln('extension ${className}Extension on $className {')
+      ..writeln("  String get name => toString().split('.').last;")
+      ..writeln('}');
+
+    File('$fileLocation\\enums\\${name.snakeCase()}_extension.dart')
+        .writeAsStringSync(buffer.toString());
     return '${name.snakeCase()}.dart';
+  }
+
+  String generateModel(String name, Map<String, dynamic> schema) {
+    final className = name.capitalize();
+    final fields = schema['properties'] as Map<String, dynamic>;
+    final buffer = StringBuffer();
+    buffer.writeln("import 'package:isar/isar.dart';");
+    buffer.writeln("import 'dart:convert';");
+    buffer.writeln();
+    buffer.writeln('@collection');
+    buffer.writeln('class $className {');
+
+    fields.forEach((fieldName, fieldSchema) {
+      String fieldType = getFieldType(fieldSchema as Map<String, dynamic>);
+      final isList = fieldType.startsWith('List');
+      if (isList) {
+        fieldType = fieldType.replaceAll('List<', '').replaceAll('>', '');
+      }
+      if (enumNamesMap.contains(fieldType)) {
+        buffer.writeln("  late $fieldType $fieldName;");
+      } else if (modelNamesMap.contains(fieldType)) {
+        buffer.writeln("  late $fieldType $fieldName;");
+      } else {
+        buffer.writeln("  late ${fieldType} $fieldName;");
+      }
+    });
+
+    buffer.writeln();
+    defineIsarModelFunctions(buffer, className, fields);
+
+    buffer.writeln('}');
+    File('$fileLocation\\models\\${name.snakeCase()}.dart')
+        .writeAsStringSync(buffer.toString());
+
+    return '${name.snakeCase()}.dart';
+  }
+
+  void defineIsarModelFunctions(
+    StringBuffer buffer,
+    String className,
+    Map<String, dynamic> fields,
+  ) {
+    // Define the fromMap, toMap, fromJson, toJson methods for Isar
+    buffer
+      ..writeln('  $className fromMap(Map<String, dynamic> map) {')
+      ..writeln('    return $className(');
+
+    fields.forEach((fieldName, fieldSchema) {
+      final fieldType = getFieldType(fieldSchema as Map<String, dynamic>);
+      buffer.writeln("      $fieldName: map['$fieldName'],");
+    });
+
+    buffer.writeln('    );');
+    buffer.writeln('  }');
+
+    buffer
+      ..writeln()
+      ..writeln('  Map<String, dynamic> toMap() {')
+      ..writeln('    return {');
+
+    fields.forEach((fieldName, fieldSchema) {
+      buffer.writeln("      '$fieldName': $fieldName,");
+    });
+
+    buffer
+      ..writeln('    };')
+      ..writeln('  }');
+
+    buffer
+      ..writeln()
+      ..writeln(
+          '  $className fromJson(String source) => fromMap(json.decode(source) as Map<String, dynamic>);')
+      ..writeln()
+      ..writeln('  String toJson() => json.encode(toMap());');
   }
 
   String getFieldType(Map<String, dynamic> fieldSchema) {
@@ -127,60 +183,6 @@ class DartGenerator {
     {
       return mapSwaggerTypeToDart(fieldSchema['type'] as String?);
     }
-  }
-
-  String generateModel(String name, Map<String, dynamic> schema) {
-    final className = name.capitalize();
-    final fields = schema['properties'] as Map<String, dynamic>;
-
-    final buffer = StringBuffer();
-    buffer.writeln("import 'dart:convert';");
-    fields.forEach((fieldName, fieldSchema) {
-      String fieldType = getFieldType(fieldSchema as Map<String, dynamic>);
-      final isList =
-          mapSwaggerTypeToDart(fieldSchema['type'] as String?) == 'List';
-      if (isList) {
-        fieldType = fieldType.replaceAll('List', '');
-        fieldType = fieldType.replaceAll('<', '');
-        fieldType = fieldType.replaceAll('>', '');
-      }
-      if (enumNamesMap.contains(fieldType)) {
-        buffer.writeln("import '../enums/enums.dart';");
-      }
-      if (modelNamesMap.contains(fieldType)) {
-        buffer.writeln("import '${fieldType.snakeCase()}.dart';");
-      }
-    });
-    buffer.writeln();
-    buffer.writeln('class $className {');
-    // Constructor
-    defineConstructor(buffer, fields, className);
-    // fromMap factory constructor
-    defineFromMap(buffer, fields, className);
-
-    // fromJson factory constructor
-    defineFromJson(buffer, fields, className);
-
-    // toMap method
-    defineToMap(buffer, fields, className);
-
-    // toJson method
-    defineToJson(buffer);
-
-    // copyWith method
-    defineCopyWith(buffer, fields, className);
-
-    // Define fields
-    defineFields(buffer, fields);
-
-    defineEmptyStaticConstructor(buffer, fields, className);
-
-    buffer.writeln('}');
-
-    File('$fileLocation\\models\\${name.snakeCase()}.dart')
-        .writeAsStringSync(buffer.toString());
-
-    return '${name.snakeCase()}.dart';
   }
 
   void defineEmptyStaticConstructor(

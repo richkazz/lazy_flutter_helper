@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:lazy_flutter_helper/common/helper_mehod.dart';
+import 'package:lazy_flutter_helper/generator/src/repository_generator.dart';
 import 'package:lazy_flutter_helper/generator/swagger_to_dart.dart';
 
 import 'swagger_parser.dart';
@@ -17,6 +18,7 @@ class DartGenerator {
   SwaggerToDartResult generate() {
     generateModels();
     generateService();
+    //RepositoryGenerator(swaggerData, fileLocation, modelNamesMap).generate();
     return SwaggerToDartResult(
       modelsNames: modelNamesMap.toList(),
       enumNames: enumNamesMap.toList(),
@@ -61,33 +63,72 @@ class DartGenerator {
         bufferModel.writeln("export '$fileName';");
       }
     });
-    final file = File('$fileLocation\\models\\models.dart');
-    file.writeAsStringSync(bufferModel.toString());
-    final fileEnum = File('$fileLocation\\enums\\enums.dart');
-    fileEnum.writeAsStringSync(bufferEnum.toString());
+    generateEnumAdapterRegistration();
+    File('$fileLocation\\models\\models.dart')
+        .writeAsStringSync(bufferModel.toString());
+    File('$fileLocation\\enums\\enums.dart')
+        .writeAsStringSync(bufferEnum.toString());
+  }
+
+  void generateEnumAdapterRegistration() {
+    final buffer = StringBuffer()
+      ..writeln("import 'package:hive/hive.dart';")
+      ..writeln("import 'enums.dart';")
+      ..writeln()
+      ..writeln('void registerEnumAdapters() {');
+    enumNamesMap.forEach((enumName) {
+      buffer.writeln('  Hive.registerAdapter(${enumName}Adapter());');
+    });
+    buffer.writeln('}');
+
+    File('$fileLocation\\enums\\enum_adapters.dart')
+        .writeAsStringSync(buffer.toString());
+  }
+
+  bool isFieldTypeNull(Map<String, dynamic> fieldSchema) {
+    late bool isNull;
+    final fieldType =
+        HelperMehods.mapSwaggerTypeToDart(fieldSchema['type'] as String?);
+    if (fieldType == 'int') {
+      isNull = fieldSchema['format'] != 'int64';
+    } else if (fieldType == 'dynamic') {
+      isNull = false;
+    } else {
+      isNull = fieldSchema['nullable'] == true;
+    }
+    return isNull;
   }
 
   String generateEnum(String name, Map<String, dynamic> schema) {
     final className = name.capitalize();
     final buffer = StringBuffer();
     final bufferDescription = StringBuffer()..writeln('enum name: $className|');
+
+    buffer.writeln("import 'package:hive/hive.dart';");
+    buffer.writeln();
+    buffer.writeln(
+        '@HiveType(typeId: ${enumNamesMap.indexOf(name) + modelNamesMap.length})');
     buffer.writeln('enum $className {');
     bufferDescription.write('enum fields:');
+
     final fields = schema['enum'] as List<dynamic>;
     for (var i = 0; i < fields.length; i++) {
       final field = fields[i] as String;
-      buffer.write(field.firstLetterLowerCase());
+      buffer.writeln('  @HiveField($i)');
+      buffer.write('  ${field.firstLetterLowerCase()}');
       bufferDescription.write('$field|');
       if (i != fields.length - 1) {
         buffer.write(',');
       } else {
         buffer
           ..write(',')
-          ..writeln('none;');
+          ..writeln('  @HiveField(${fields.length})')
+          ..writeln('  none;');
       }
-      buffer.writeln('');
+      buffer.writeln();
     }
-    buffer.writeln('');
+
+    buffer.writeln();
     for (var i = 0; i < fields.length; i++) {
       final field = fields[i] as String;
       buffer.writeln(
@@ -95,10 +136,54 @@ class DartGenerator {
       );
     }
     buffer.writeln('}');
+
+    // Generate enum adapter
+    generateEnumAdapter(buffer, className, fields);
+
     File('$fileLocation\\enums\\${name.snakeCase()}.dart')
         .writeAsStringSync(buffer.toString());
     enumNamesAndDefinitions[className] = bufferDescription.toString();
     return '${name.snakeCase()}.dart';
+  }
+
+  void generateEnumAdapter(
+      StringBuffer buffer, String className, List<dynamic> fields) {
+    buffer
+      ..writeln()
+      ..writeln('class ${className}Adapter extends TypeAdapter<$className> {')
+      ..writeln('  @override')
+      ..writeln(
+          '  final int typeId = ${enumNamesMap.indexOf(className) + modelNamesMap.length};')
+      ..writeln()
+      ..writeln('  @override')
+      ..writeln('  $className read(BinaryReader reader) {')
+      ..writeln('    switch (reader.readByte()) {');
+    for (var i = 0; i < fields.length; i++) {
+      final field = fields[i] as String;
+      buffer.writeln('      case $i:');
+      buffer.writeln(
+          '        return $className.${field.firstLetterLowerCase()};');
+    }
+    buffer.writeln('      default:');
+    buffer.writeln('        return $className.none;');
+    buffer.writeln('    }');
+    buffer.writeln('  }');
+    buffer.writeln();
+    buffer.writeln('  @override');
+    buffer.writeln('  void write(BinaryWriter writer, $className obj) {');
+    buffer.writeln('    switch (obj) {');
+    for (var i = 0; i < fields.length; i++) {
+      final field = fields[i] as String;
+      buffer.writeln('      case $className.${field.firstLetterLowerCase()}:');
+      buffer.writeln('        writer.writeByte($i);');
+      buffer.writeln('        break;');
+    }
+    buffer.writeln('      case $className.none:');
+    buffer.writeln('        writer.writeByte(${fields.length});');
+    buffer.writeln('        break;');
+    buffer.writeln('    }');
+    buffer.writeln('  }');
+    buffer.writeln('}');
   }
 
   String generateEnumExtension(String name, Map<String, dynamic> schema) {
@@ -125,7 +210,7 @@ class DartGenerator {
       return 'List<$typeInList>';
     }
     {
-      return mapSwaggerTypeToDart(fieldSchema['type'] as String?);
+      return HelperMehods.mapSwaggerTypeToDart(fieldSchema['type'] as String?);
     }
   }
 
@@ -133,12 +218,14 @@ class DartGenerator {
     final className = name.capitalize();
     final fields = schema['properties'] as Map<String, dynamic>;
 
-    final buffer = StringBuffer();
-    buffer.writeln("import 'dart:convert';");
+    final buffer = StringBuffer()
+      ..writeln("import 'package:hive/hive.dart';")
+      ..writeln("import 'dart:convert';");
     fields.forEach((fieldName, fieldSchema) {
       String fieldType = getFieldType(fieldSchema as Map<String, dynamic>);
       final isList =
-          mapSwaggerTypeToDart(fieldSchema['type'] as String?) == 'List';
+          HelperMehods.mapSwaggerTypeToDart(fieldSchema['type'] as String?) ==
+              'List';
       if (isList) {
         fieldType = fieldType.replaceAll('List', '');
         fieldType = fieldType.replaceAll('<', '');
@@ -151,8 +238,11 @@ class DartGenerator {
         buffer.writeln("import '${fieldType.snakeCase()}.dart';");
       }
     });
-    buffer.writeln();
-    buffer.writeln('class $className {');
+    buffer
+      ..writeln()
+      ..writeln(
+          '@HiveType(typeId: ${modelNamesMap.toList().indexOf(className)})')
+      ..writeln('class $className extends HiveObject {');
     // Constructor
     defineConstructor(buffer, fields, className);
     // fromMap factory constructor
@@ -177,6 +267,9 @@ class DartGenerator {
 
     buffer.writeln('}');
 
+    // Generate Hive adapter
+    generateHiveAdapter(buffer, className, fields);
+
     File('$fileLocation\\models\\${name.snakeCase()}.dart')
         .writeAsStringSync(buffer.toString());
 
@@ -192,11 +285,12 @@ class DartGenerator {
     //email: '', password: '', twoFactorCode: '', twoFactorRecoveryCode: '');
     buffer
       ..writeln()
-      ..writeln('  static const $className empty = $className(');
+      ..writeln('  static $className empty = $className(');
     fields.forEach((fieldName, fieldSchema) {
       final fieldType = getFieldType(fieldSchema as Map<String, dynamic>);
       final isList =
-          mapSwaggerTypeToDart(fieldSchema['type'] as String?) == 'List';
+          HelperMehods.mapSwaggerTypeToDart(fieldSchema['type'] as String?) ==
+              'List';
       if (modelNamesMap.contains(fieldType)) {
         buffer.writeln('    $fieldName: $fieldType.empty,');
       } else if (enumNamesMap.contains(fieldType)) {
@@ -205,7 +299,7 @@ class DartGenerator {
         buffer.writeln('    $fieldName: [],');
       } else {
         buffer.writeln(
-          '    $fieldName: ${mapSwaggerTypeToDartConstantValue(fieldSchema['type'] as String?)},',
+          '    $fieldName: ${HelperMehods.mapSwaggerTypeToDartConstantValue(fieldSchema['type'] as String?)},',
         );
       }
     });
@@ -291,9 +385,10 @@ class DartGenerator {
     buffer.writeln('    return $className(');
     fields.forEach((fieldName, fieldSchema) {
       final fieldType = getFieldType(fieldSchema as Map<String, dynamic>);
-      final nullable = HelperMehods.isFieldTypeNull(fieldSchema) ? '?' : '';
+      final nullable = isFieldTypeNull(fieldSchema) ? '?' : '';
       final isList =
-          mapSwaggerTypeToDart(fieldSchema['type'] as String?) == 'List';
+          HelperMehods.mapSwaggerTypeToDart(fieldSchema['type'] as String?) ==
+              'List';
       if (isList) {
         var fieldTypeRemoveList = fieldType.replaceAll('List', '');
         fieldTypeRemoveList = fieldTypeRemoveList.replaceAll('<', '');
@@ -343,7 +438,8 @@ class DartGenerator {
       ..writeln('    );')
       ..writeln('  }');
     bufferModelDescription.write(
-        '  Methods: fromMap,toJson,fromJson,toMap,empty,isEmpty,isNotEmpty');
+      '  Methods: fromMap,toJson,fromJson,toMap,empty,isEmpty,isNotEmpty',
+    );
     modelNamesAndDefinitionsMap[className] = bufferModelDescription.toString();
   }
 
@@ -354,82 +450,152 @@ class DartGenerator {
   ) {
     buffer
       ..writeln()
-      ..writeln('  const $className({');
+      ..writeln('  $className({');
     fields.forEach((fieldName, fieldSchema) {
-      final isRequired =
-          HelperMehods.isFieldTypeNull(fieldSchema as Map<String, dynamic>)
-              ? ''
-              : 'required ';
+      final isRequired = isFieldTypeNull(fieldSchema as Map<String, dynamic>)
+          ? ''
+          : 'required ';
       buffer.writeln('    $isRequired this.$fieldName,');
     });
     buffer.writeln('  });');
   }
 
   void defineFields(StringBuffer buffer, Map<String, dynamic> fields) {
+    var fieldIndex = 0;
     fields.forEach((fieldName, fieldSchema) {
       final fieldType = getFieldType(fieldSchema as Map<String, dynamic>);
-      final nullable = HelperMehods.isFieldTypeNull(fieldSchema) ? '?' : '';
-      buffer.writeln('  final $fieldType$nullable $fieldName;');
+      final nullable = isFieldTypeNull(fieldSchema) ? '?' : '';
+      buffer
+        ..writeln('@HiveField($fieldIndex)')
+        ..writeln('  final $fieldType$nullable $fieldName;');
+      fieldIndex++;
     });
   }
 
-  String mapSwaggerTypeToDart(String? type) {
-    switch (type) {
-      case 'string':
-        return 'String';
-      case 'integer':
-        return 'int';
-      case 'number':
-        return 'double';
-      case 'boolean':
-        return 'bool';
-      case 'array':
-        return 'List'; // You might need to handle array of specific types
-      default:
-        return 'dynamic';
-    }
-  }
-
-  String mapSwaggerTypeToDartConstantValue(String? type) {
-    switch (type) {
-      case 'string':
-        return "''";
-      case 'integer':
-        return '0';
-      case 'number':
-        return '0.0';
-      case 'boolean':
-        return 'false';
-      default:
-        return 'null';
-    }
+  void generateHiveAdapter(
+    StringBuffer buffer,
+    String className,
+    Map<String, dynamic> fields,
+  ) {
+    buffer
+      ..writeln('\nclass ${className}Adapter extends TypeAdapter<$className> {')
+      ..writeln('  @override')
+      ..writeln(
+        '  final int typeId = ${modelNamesMap.toList().indexOf(className)};',
+      )
+      ..writeln()
+      ..writeln('  @override')
+      ..writeln('  $className read(BinaryReader reader) {')
+      ..writeln('    final numOfFields = reader.readByte();')
+      ..writeln('    final fields = <int, dynamic>{')
+      ..writeln(
+        '      for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),',
+      )
+      ..writeln('    };')
+      ..writeln('    return $className(');
+    var fieldIndex = 0;
+    fields.forEach((fieldName, fieldSchema) {
+      buffer.writeln(
+        '      $fieldName: fields[$fieldIndex] as ${getFieldType(fieldSchema as Map<String, dynamic>)},',
+      );
+      fieldIndex++;
+    });
+    buffer
+      ..writeln('    );')
+      ..writeln('  }')
+      ..writeln()
+      ..writeln('  @override')
+      ..writeln('  void write(BinaryWriter writer, $className obj) {')
+      ..writeln('    writer')
+      ..writeln('      ..writeByte(${fields.length})');
+    fieldIndex = 0;
+    fields.forEach((fieldName, fieldSchema) {
+      buffer
+        ..writeln('      ..writeByte($fieldIndex)')
+        ..writeln('      ..write(obj.$fieldName)');
+      fieldIndex++;
+    });
+    buffer
+      ..writeln('    ;')
+      ..writeln('  }')
+      ..writeln('}');
   }
 
   void generateResultClass(StringBuffer buffer) {
-    buffer
-      ..writeln('class Result<T, E> {')
-      ..writeln('  T? data;')
-      ..writeln('  E? errorData;')
-      ..writeln('  bool isSuccess;')
-      ..writeln()
-      ..writeln('  Result({')
-      ..writeln('    this.data,')
-      ..writeln('    this.errorData,')
-      ..writeln('    required this.isSuccess,')
-      ..writeln('  });')
-      ..writeln()
-      ..writeln('  Result<T, E> copyWith({')
-      ..writeln('    T? data,')
-      ..writeln('    bool? isSuccess,')
-      ..writeln('    E? errorData')
-      ..writeln('  }) {')
-      ..writeln('    return Result<T, E>(')
-      ..writeln('      data: data ?? this.data,')
-      ..writeln('      isSuccess: isSuccess ?? this.isSuccess,')
-      ..writeln('      errorData: errorData ?? this.errorData')
-      ..writeln('    );')
-      ..writeln('  }')
-      ..writeln('}');
+    buffer.writeln(r'''
+class Result<T, E> {
+  final T? data;
+  final E? errorData;
+  final bool isSuccess;
+  final bool isFromCache;
+  final bool isOfflineQueued;
+
+  const Result({
+    this.data,
+    this.errorData,
+    required this.isSuccess,
+    this.isFromCache = false,
+    this.isOfflineQueued = false,
+  });
+
+  bool get isFailure => !isSuccess;
+
+  Result<T, E> copyWith({
+    T? data,
+    E? errorData,
+    bool? isSuccess,
+    bool? isFromCache,
+    bool? isOfflineQueued,
+  }) {
+    return Result<T, E>(
+      data: data ?? this.data,
+      errorData: errorData ?? this.errorData,
+      isSuccess: isSuccess ?? this.isSuccess,
+      isFromCache: isFromCache ?? this.isFromCache,
+      isOfflineQueued: isOfflineQueued ?? this.isOfflineQueued,
+    );
+  }
+
+  @override
+  String toString() {
+    return 'Result{data: $data, errorData: $errorData, isSuccess: $isSuccess, isFromCache: $isFromCache, isOfflineQueued: $isOfflineQueued}';
+  }
+
+  factory Result.success(T data, {bool isFromCache = false}) => Result<T, E>(
+        data: data,
+        isSuccess: true,
+        isFromCache: isFromCache,
+      );
+
+  factory Result.failure(E errorData, {bool isOfflineQueued = false}) => Result<T, E>(
+        errorData: errorData,
+        isSuccess: false,
+        isOfflineQueued: isOfflineQueued,
+      );
+
+  factory Result.offlineQueued() => Result<T, E>(
+        isSuccess: false,
+        isOfflineQueued: true,
+      );
+
+  bool get isSuccessFromNetwork => isSuccess && !isFromCache;
+  bool get isSuccessFromCache => isSuccess && isFromCache;
+
+  R when<R>({
+    required R Function(T data) success,
+    required R Function(E errorData) failure,
+    R Function()? offlineQueued,
+  }) {
+    if (isSuccess) {
+      return success(data as T);
+    } else if (isOfflineQueued) {
+      return offlineQueued?.call() ?? failure(errorData as E);
+    } else {
+      return failure(errorData as E);
+    }
+  }
+}
+''');
   }
 
   void generateExceptionClass(StringBuffer buffer) {
@@ -518,7 +684,7 @@ class DartGenerator {
     // get the parameters
     final queryParameters = <String>[];
     final buildQueryString = <String>[];
-    path = handelParameterSettingAndPathBuilding(
+    path = HelperMehods.handelParameterSettingAndPathBuilding(
       parameters,
       queryParameters,
       buildQueryString,
@@ -571,10 +737,10 @@ class DartGenerator {
     var methodSignature = '';
     if (queryParameters.isNotEmpty) {
       methodSignature =
-          '  Future<${getReturnType(throwErrorType, returnType)}> $methodName({${queryParameters.join(', ')}}) async {';
+          '  Future<${HelperMehods.getReturnType(throwErrorType, returnType)}> $methodName({${queryParameters.join(', ')}}) async {';
     } else {
       methodSignature =
-          '  Future<${getReturnType(throwErrorType, returnType)}> $methodName() async {';
+          '  Future<${HelperMehods.getReturnType(throwErrorType, returnType)}> $methodName() async {';
     }
     methodNamesAndSignatures.addAll({methodName: methodSignature.trim()});
     buffer
@@ -610,41 +776,6 @@ class DartGenerator {
       ..writeln('  }');
   }
 
-  String handelParameterSettingAndPathBuilding(
-    List<dynamic>? parameters,
-    List<String> queryParameters,
-    List<String> buildQueryString,
-    String path,
-  ) {
-    if (parameters != null) {
-      for (var i = 0; i < parameters.length; i++) {
-        final parameter = parameters[i] as Map<String, dynamic>;
-        if (parameter['in'] == 'path') {
-          final type =
-              mapSwaggerTypeToDart(parameter['schema']['type'] as String);
-          final name = parameter['name'];
-          queryParameters.add('required $type $name');
-          continue;
-        }
-        if (parameter['in'] == 'query') {
-          final type =
-              mapSwaggerTypeToDart(parameter['schema']['type'] as String);
-          final name = parameter['name'];
-          queryParameters.add('required $type $name');
-          buildQueryString.add('${parameter['name']}=\$$name');
-          continue;
-        }
-      }
-    }
-    if (buildQueryString.isNotEmpty) {
-      path = '$path?${buildQueryString.join('&')}';
-    }
-
-    path = path.replaceAll('{', r'$');
-    path = path.replaceAll('}', '');
-    return path;
-  }
-
   void for401(
     StringBuffer buffer,
     String returnType,
@@ -669,7 +800,7 @@ class DartGenerator {
         '          final result = $throwErrorType.fromJson(response.body);',
       );
       buffer.writeln(
-        '          return ${getReturnType(throwErrorType, returnType)}(errorData: result, isSuccess: true);',
+        '          return ${HelperMehods.getReturnType(throwErrorType, returnType)}(errorData: result, isSuccess: true);',
       );
     } else {
       buffer.writeln('        case 400:');
@@ -699,26 +830,14 @@ class DartGenerator {
         );
       }
       buffer.writeln(
-        '          return ${getReturnType(throwErrorType, returnType)}(data: result, isSuccess: true);',
+        '          return ${HelperMehods.getReturnType(throwErrorType, returnType)}(data: result, isSuccess: true);',
       );
     } else {
       buffer
         ..writeln('        case 200:')
         ..writeln(
-          '          return ${getReturnType(throwErrorType, returnType)}(isSuccess: true);',
+          '          return ${HelperMehods.getReturnType(throwErrorType, returnType)}(isSuccess: true);',
         );
-    }
-  }
-
-  String getReturnType(String errorType, String returnType) {
-    if (returnType == 'void' && errorType.isNotEmpty) {
-      return 'Result<void,$errorType>';
-    } else if (returnType == 'void' && errorType.isEmpty) {
-      return 'Result<void,void>';
-    } else if (returnType != 'void' && errorType.isEmpty) {
-      return 'Result<$returnType,void>';
-    } else {
-      return 'Result<$returnType,$errorType>';
     }
   }
 
@@ -750,14 +869,17 @@ class DartGenerator {
       ..writeln("    'Content-Type': 'application/json',")
       ..writeln('  };')
       ..writeln(
-          '  Future<http.Response> get(String url, {Map<String, String>? headers}) async {')
+        '  Future<http.Response> get(String url, {Map<String, String>? headers}) async {',
+      )
       ..writeln(
-          r'    final response = await http.get(Uri.parse($baseUrl$url), headers: {...this.headers, ...?headers});')
+        r"    final response = await http.get(Uri.parse('$baseUrl$url'), headers: {...this.headers, ...?headers});",
+      )
       ..writeln('    if (response.statusCode == 401) {')
       ..writeln('      final result = await refreshToken();')
       ..writeln('      if (result) {')
       ..writeln(
-          r'        final response = await http.get(Uri.parse($baseUrl$url), headers: {...this.headers, ...?headers});')
+        r"        final response = await http.get(Uri.parse('$baseUrl$url'), headers: {...this.headers, ...?headers});",
+      )
       ..writeln('        return response;')
       ..writeln('      }')
       ..writeln('    }')
@@ -766,10 +888,12 @@ class DartGenerator {
       ..writeln()
       ..writeln('  Future<bool> refreshToken() async {')
       ..writeln(
-          '    final refreshToken = await handelJsonToken.getRefreshToken;')
+        '    final refreshToken = await handelJsonToken.getRefreshToken;',
+      )
       ..writeln('    if (refreshToken != null) {')
       ..writeln(
-          '      final request = RefreshRequest(refreshToken: refreshToken);')
+        '      final request = RefreshRequest(refreshToken: refreshToken);',
+      )
       ..writeln('      final response = await http.post(')
       ..writeln(r"        Uri.parse('$baseUrl/refresh'),")
       ..writeln("        headers: {'Content-Type': 'application/json'},")
@@ -777,13 +901,17 @@ class DartGenerator {
       ..writeln('      );')
       ..writeln('      if (response.statusCode == 200) {')
       ..writeln(
-          '        final result = AccessTokenResponse.fromJson(response.body);')
+        '        final result = AccessTokenResponse.fromJson(response.body);',
+      )
       ..writeln(
-          '        await handelJsonToken.setJsonToken(result.accessToken);')
+        '        await handelJsonToken.setJsonToken(result.accessToken);',
+      )
       ..writeln(
-          '        await handelJsonToken.setRefreshToken(result.refreshToken);')
+        '        await handelJsonToken.setRefreshToken(result.refreshToken);',
+      )
       ..writeln(
-          r"        headers['Authorization'] = 'Bearer ${result.accessToken}';")
+        r"        headers['Authorization'] = 'Bearer ${result.accessToken}';",
+      )
       ..writeln('        return true;')
       ..writeln('      }')
       ..writeln('    }')
@@ -858,4 +986,8 @@ class DartGenerator {
       ..writeln('}');
     return buffer.toString();
   }
+}
+
+extension SetExtension<T> on Set<T> {
+  int indexOf(T element) => toList().indexOf(element);
 }

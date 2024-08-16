@@ -2,7 +2,8 @@
 
 import 'dart:io';
 
-import 'package:lazy_flutter_helper/generator/src/generator.dart';
+import 'package:lazy_flutter_helper/common/helper_mehod.dart';
+import 'package:lazy_flutter_helper/generator/src/generator_with_local_first.dart';
 
 class BlocGenerator {
   Future<void> generate({

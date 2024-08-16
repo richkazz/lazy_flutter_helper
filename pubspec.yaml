@@ -17,28 +17,30 @@ dependencies:
     sdk: flutter
   flutter_svg: ^2.0.10+1
   fzregex: ^2.0.0
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
   http: ^1.2.1
   intl: any
+  isar: ^3.1.0+1
+  isar_flutter_libs: ^3.1.0+1
+  path_provider: ^2.1.4
   responsive_framework: ^1.4.0
   shared_preferences: ^2.2.3
 
 dev_dependencies:
   bloc_test: ^9.1.6
-  build_runner: ^2.4.11
+  build_runner: ^2.4.12
   flutter_gen_runner: ^5.5.0+1
   flutter_test:
     sdk: flutter
+  hive_generator: ^2.0.1
+  isar_generator: ^3.1.0+1
   mocktail: ^1.0.3
   very_good_analysis: ^5.1.0
 
 flutter:
   uses-material-design: true
   generate: true
-
-  assets:
-    - assets/icons/
-    - assets/images/
-    - assets/audios/
 
 flutter_gen:
   assets:

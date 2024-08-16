@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:lazy_flutter_helper/generator/src/generator.dart';
+import 'package:lazy_flutter_helper/generator/src/generator_with_local_first.dart';
 import 'package:lazy_flutter_helper/generator/src/swagger_parser.dart';
 
 //dart compile exe bin/swagger_to_dart.dart

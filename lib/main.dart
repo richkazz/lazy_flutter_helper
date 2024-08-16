@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -12,7 +10,9 @@ import 'package:lazy_flutter_helper/src/src.dart';
 import 'package:lazy_flutter_helper/widgets/input_text_field.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
   runApp(const MainApp());
 }
 
@@ -189,9 +189,10 @@ class _AppViewState extends State<AppView> {
                         width: AppSpacing.lg,
                       ),
                       Expanded(
-                          child: SearchMethodWidget(
-                        values: swaggerToDartResult.methodNames,
-                      )),
+                        child: SearchMethodWidget(
+                          values: swaggerToDartResult.methodNames,
+                        ),
+                      ),
                     ],
                   ),
                 );
@@ -462,9 +463,10 @@ class _ModelListItemState extends State<ModelListItem> {
       leading: IconButton(
         icon: const Icon(Icons.copy),
         onPressed: () => _copyToClipboard(
-            widget.swaggerToDartResult
-                .modelNamesAndDefinitionsMap[widget.modelName]!,
-            context),
+          widget.swaggerToDartResult
+              .modelNamesAndDefinitionsMap[widget.modelName]!,
+          context,
+        ),
       ),
       title: Text(widget.modelName),
     );
